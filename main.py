@@ -53,32 +53,36 @@ def thread_copy(a, num_threads):
 if __name__ == '__main__':
     plt.figure()
 
-    if int(os.environ['NUMBA_NUM_THREADS']) != int(os.environ['NUMEXPR_NUM_THREADS']):
+    if int(os.environ['NUMBA_NUM_THREADS']) != int(os.environ['NUMEXPR_MAX_THREADS']):
         warnings.warn('Number of NUMBA and NUMEXPR threads is not the same!')
     NUM_THREADS = int(os.environ['NUMBA_NUM_THREADS'])
 
-    for L in [128, 256, 512, 1024, 2048]:
+    ntrials = 3
+
+    for L in [128]: #, 256, 512, ]: #1024, 2048]:
 
         a = rng.random(size=L * L * L, dtype=np.single)
+        print(L, a.dtype)
 
         times = list()
         b = a.copy()
-        for _ in range(5):
+        for _ in range(ntrials):
             t0 = time.perf_counter()
-            b = a.copy()
+            b = np.empty_like(a)
+            memoryview(b)[:] = memoryview(a)
             t1 = time.perf_counter()
             times.append(t1 - t0)
         assert not np.shares_memory(a, b)
         assert np.array_equal(a, b)
-        print(f'numpy.copy takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
-        s1 = plt.scatter([len(a)] * 5,
+        print(f'memoryview takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
+        s1 = plt.scatter([len(a)] * ntrials,
                          times,
                          marker='x',
                          color=plt.cm.cividis(0.0))
 
         times = list()
         b = ne.evaluate('a')
-        for _ in range(5):
+        for _ in range(ntrials):
             t0 = time.perf_counter()
             b = ne.evaluate('a')
             t1 = time.perf_counter()
@@ -86,14 +90,14 @@ if __name__ == '__main__':
         assert not np.shares_memory(a, b)
         assert np.array_equal(a, b)
         print(f'numexpr takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
-        s2 = plt.scatter([len(a)] * 5,
+        s2 = plt.scatter([len(a)] * ntrials,
                          times,
                          marker='o',
                          color=plt.cm.cividis(0.333))
 
         times = list()
         b = cp(a)
-        for _ in range(5):
+        for _ in range(ntrials):
             t0 = time.perf_counter()
             b = cp(a)
             t1 = time.perf_counter()
@@ -101,13 +105,13 @@ if __name__ == '__main__':
         assert not np.shares_memory(a, b)
         assert np.array_equal(a, b)
         print(f'numba takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
-        s3 = plt.scatter([len(a)] * 5,
+        s3 = plt.scatter([len(a)] * ntrials,
                          times,
                          marker='>',
                          color=plt.cm.cividis(1.0))
 
         times = list()
-        for _ in range(5):
+        for _ in range(ntrials):
             t0 = time.perf_counter()
             b = thread_copy(a, num_threads=NUM_THREADS)
             t1 = time.perf_counter()
@@ -116,7 +120,7 @@ if __name__ == '__main__':
         assert np.array_equal(a, b)
         print(
             f'threads.copy takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
-        s0 = plt.scatter([len(a)] * 5,
+        s0 = plt.scatter([len(a)] * ntrials,
                          times,
                          marker='+',
                          color=plt.cm.cividis(0.666))
@@ -132,4 +136,4 @@ if __name__ == '__main__':
             'ndarray.copy()', 'numexpr.eval()', 'numba.njit()', f'{NUM_THREADS} Thread',
         ],
     )
-    plt.savefig('copy.svg', dpi=600)
+    plt.savefig('copy.png', dpi=600)
