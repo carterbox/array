@@ -22,9 +22,20 @@ def cp(x):
         y[i] = x[i]
     return y
 
+@numba.njit(parallel=True)
+def update(m, a, x):
+    y = np.empty_like(x)
+    n = len(x)
+    for i in numba.prange(n):
+        y[i] = m[i] + a[i] * x[i]
+    return y
 
 def fill_array(res, res0, st, end):
     res[st:end] = res0[st:end]
+
+
+def update_array(b, m, a, x, st, end):
+    b[st:end] = m[st:end] + a[st:end] * x[st:end]
 
 
 def array_split_index(length, num_chunks):
@@ -51,24 +62,23 @@ def thread_copy(a, num_threads):
         mthreads[k].join()
     return b
 
+def thread_update(m, a, x, num_threads):
+    b = np.empty_like(a)
+    mthreads = []
+    chunks = array_split_index(len(a), num_threads)
+    for k in range(num_threads):
+        th = threading.Thread(
+            target=update_array,
+            args=(b, m, a, x, chunks[k], chunks[k+1]),
+        )
+        th.start()
+        mthreads.append(th)
+    for k in range(num_threads):
+        mthreads[k].join()
+    return b
+
 # NOTE: Let's not use multiprocess because each process has its own memory so
 # there is additional copy overhead.
-# def process_copy(a, num_process):
-#     manager = multiprocessing.Manager()
-#     return_dict = manager.dict()
-#     b = np.zeros_like(a)
-#     mthreads = []
-#     chunks = array_split_index(len(a), num_process)
-#     for k in range(num_process):
-#         th = multiprocessing.Process(
-#             target=fill_array,
-#             args=(b, a, chunks[k], chunks[k+1]),
-#         )
-#         th.start()
-#         mthreads.append(th)
-#     for k in range(num_process):
-#         mthreads[k].join()
-#     return b
 
 if __name__ == '__main__':
     plt.figure()
@@ -80,9 +90,11 @@ if __name__ == '__main__':
     ntrials = 5
     noptions = 6 - 1
 
-    for L in [128, 256, 512, 1024, 2048]:
+    for L in [2048]:
 
+        m = rng.random(size=L * L * L, dtype=np.double)
         a = rng.random(size=L * L * L, dtype=np.double)
+        x = rng.random(size=L * L * L, dtype=np.double)
         print(L, a.dtype)
 
         # times = list()
@@ -106,13 +118,13 @@ if __name__ == '__main__':
         b = ne.evaluate('a')
         for _ in range(ntrials):
             t0 = time.perf_counter()
-            b = ne.evaluate('a')
+            b = ne.evaluate('m + a * x')
             t1 = time.perf_counter()
             times.append(t1 - t0)
         assert not np.shares_memory(a, b)
         if __debug__:
             print(a, b)
-        assert np.array_equal(a, b)
+        # assert np.array_equal(a, b)
         print(f'numexpr takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
         s2 = plt.scatter([len(a) * 1.01] * ntrials,
                          times,
@@ -123,13 +135,13 @@ if __name__ == '__main__':
         b = cp(a)
         for _ in range(ntrials):
             t0 = time.perf_counter()
-            b = cp(a)
+            b = update(m, a, x)
             t1 = time.perf_counter()
             times.append(t1 - t0)
         assert not np.shares_memory(a, b)
         if __debug__:
             print(a, b)
-        assert np.array_equal(a, b)
+        # assert np.array_equal(a, b)
         print(f'numba takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
         s3 = plt.scatter([len(a) * 1.02] * ntrials,
                          times,
@@ -139,15 +151,15 @@ if __name__ == '__main__':
         times = list()
         for _ in range(ntrials):
             t0 = time.perf_counter()
-            b = thread_copy(a, num_threads=NUM_THREADS)
+            b = thread_update(m, a, x, num_threads=NUM_THREADS)
             t1 = time.perf_counter()
             times.append(t1 - t0)
         assert not np.shares_memory(a, b)
         if __debug__:
             print(a, b)
-        assert np.array_equal(a, b)
+        # assert np.array_equal(a, b)
         print(
-            f'threads.copy takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
+            f'threads takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
         s0 = plt.scatter([len(a) * 1.03] * ntrials,
                          times,
                          marker='+',
@@ -157,13 +169,13 @@ if __name__ == '__main__':
         for _ in range(ntrials):
             t0 = time.perf_counter()
             b = np.empty_like(a)
-            custom.copyd(a, b)
+            custom.updated(m, a, x, b)
             t1 = time.perf_counter()
             times.append(t1 - t0)
         assert not np.shares_memory(a, b)
         if __debug__:
             print(a, b)
-        assert np.array_equal(a, b)
+        # assert np.array_equal(a, b)
         print(
             f'nanobind takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
         s4 = plt.scatter([len(a) * 1.04] * ntrials,
@@ -171,33 +183,24 @@ if __name__ == '__main__':
                          marker='s',
                          color=plt.cm.cividis(4/noptions))
 
-
-        times = list()
-        for _ in range(ntrials):
-            t0 = time.perf_counter()
-            b = custom.copy1d(a)
-            t1 = time.perf_counter()
-            times.append(t1 - t0)
-        assert not np.shares_memory(a, b)
-        if __debug__:
-            print(a, b)
-        assert np.array_equal(a, b)
-        print(
-            f'nanobind1 takes {np.mean(times):.3e} +/- {np.std(times):.3e}')
-        s5 = plt.scatter([len(a) * 1.05] * ntrials,
-                         times,
-                         marker='s',
-                         color=plt.cm.cividis(5/noptions))
-
     plt.loglog()
     plt.xscale('log', base=2)
-    plt.xlabel('Number of Elements Copied')
-    plt.ylabel('Time to Copy [s]')
-    plt.title(f'Time to Copy a {a.dtype} NumPy Array')
+    plt.yscale('log', base=2)
+    plt.xlabel('Number of Elements Updated (b = m + a * x)')
+    plt.ylabel('Time to Update [s]')
+    plt.title(f'Time to Update a {a.dtype} NumPy Array')
     plt.legend(
-        handles=[s2, s3, s0, s4, s5],
+        handles=[s2, s3, s0, s4],
         labels=[
-            'numexpr.eval()', 'numba.njit()', f'{NUM_THREADS} Thread', 'nanobind', 'nanobind1',
+            'numexpr.eval()', 'numba.njit()', f'{NUM_THREADS} Thread', 'nanobind',
         ],
     )
-    plt.savefig('copy.png', dpi=600)
+    plt.savefig('update.png', dpi=600)
+
+
+def direction_dy(d, grad1, grad0):
+    return (
+        - grad1
+        + d * np.sum(np.square(grad1))
+        / (np.sum(d * (grad1 - grad0)) + 1e-32)
+    )
