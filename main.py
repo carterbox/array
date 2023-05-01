@@ -157,7 +157,7 @@ if __name__ == '__main__':
         for _ in range(ntrials):
             t0 = time.perf_counter()
             b = np.empty_like(a)
-            custom.copy(a, b)
+            custom.copyd(a, b)
             t1 = time.perf_counter()
             times.append(t1 - t0)
         assert not np.shares_memory(a, b)
@@ -175,7 +175,7 @@ if __name__ == '__main__':
         times = list()
         for _ in range(ntrials):
             t0 = time.perf_counter()
-            b = custom.copy1(a)
+            b = custom.copy1d(a)
             t1 = time.perf_counter()
             times.append(t1 - t0)
         assert not np.shares_memory(a, b)
